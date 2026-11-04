@@ -1,0 +1,16 @@
+# Build output
+target/
+bin/
+
+# Anypoint Studio / Eclipse
+.mule/
+.settings/
+.classpath
+.tooling-project/
+
+# Local tooling
+.atl/
+.codegraph/
+
+# OS
+.DS_Store

@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:sqs="http://www.mulesoft.org/schema/mule/sqs"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/sqs http://www.mulesoft.org/schema/mule/sqs/current/mule-sqs.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+	<configuration-properties doc:name="Configuration properties" file="config.yaml" />
+
+	<http:listener-config name="HTTP_Listener_config" doc:name="HTTP Listener config">
+		<http:listener-connection host="${http.host}" port="${http.port}" />
+	</http:listener-config>
+
+	<sqs:config name="Amazon_SQS_Config" doc:name="Amazon SQS Configuration" defaultQueueUrl="${sqs.queueUrl}">
+		<sqs:role-connection roleARN="${sqs.roleArn}" accessKey="${sqs.accessKey}" secretKey="${sqs.secretKey}"
+			region="${sqs.region}" testQueueArn="${sqs.queueArn}">
+			<reconnection>
+				<reconnect frequency="5000" count="3" />
+			</reconnection>
+			<sqs:large-payload-support bucket="${sqs.largePayload.bucket}" s3KeyPrefix="${sqs.largePayload.keyPrefix}" />
+		</sqs:role-connection>
+	</sqs:config>
+
+	<!-- Publisher example: POST /events sends the request body to the FIFO queue -->
+	<flow name="send-event-flow">
+		<http:listener doc:name="POST /events" config-ref="HTTP_Listener_config" path="/events" allowedMethods="POST">
+			<http:response statusCode="202" />
+		</http:listener>
+		<ee:transform doc:name="Build SQS message">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/java
+---
+{
+	body: write(payload, "application/json"),
+	// FIFO: messages sharing a groupId are delivered in order
+	groupId: attributes.headers.'x-message-group-id' default p('sqs.defaultGroupId'),
+	// FIFO: same deduplicationId within 5 minutes is delivered only once
+	deduplicationId: attributes.headers.'x-deduplication-id' default uuid()
+} as Object { class: "org.mule.extension.sqs.api.model.Message" }]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<logger level="INFO" doc:name="Log sending message" message='#[%dw 2.0
+output application/json indent=false
+---
+{
+	message: "Sending message to SQS",
+	additionalInformation: {
+		groupId: payload.groupId,
+		deduplicationId: payload.deduplicationId
+	}
+}]' />
+		<sqs:send-message doc:name="Send message" config-ref="Amazon_SQS_Config" />
+		<logger level="INFO" doc:name="Log message sent" message='#[%dw 2.0
+output application/json indent=false
+---
+{
+	message: "SQS message sent",
+	additionalInformation: {
+		messageId: payload.messageId
+	}
+}]' />
+		<ee:transform doc:name="Build response">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	messageId: payload.messageId
+}]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+	</flow>
+
+	<!-- Subscriber: polls the FIFO queue (long polling) and processes each message.
+		Stopped so published messages stay in the queue for inspection; remove initialState to consume again. -->
+	<flow name="receive-event-flow" initialState="stopped">
+		<sqs:receivemessages doc:name="Receive messages" config-ref="Amazon_SQS_Config"
+			numberOfMessages="${sqs.consumer.numberOfMessages}"
+			visibilityTimeout="${sqs.consumer.visibilityTimeout}" />
+		<logger level="INFO" doc:name="Log message received" message='#[%dw 2.0
+output application/json indent=false
+---
+{
+	message: "SQS message received",
+	additionalInformation: {
+		body: payload
+	}
+}]' />
+	</flow>
+</mule>

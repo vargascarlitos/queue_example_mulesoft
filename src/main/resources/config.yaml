@@ -1,0 +1,25 @@
+http:
+  host: "0.0.0.0"
+  port: "8081"
+
+# sqs.accessKey and sqs.secretKey are intentionally not defined here.
+# They are the base credentials of the IAM principal allowed to assume sqs.roleArn.
+# Provide them as runtime properties:
+#   - Anypoint Studio (Run Configuration > VM arguments): -Dsqs.accessKey=... -Dsqs.secretKey=...
+#   - Standalone runtime: ./mule -M-Dsqs.accessKey=... -M-Dsqs.secretKey=...
+#   - Runtime Manager: secure properties
+#
+# Replace the placeholder values below with your own AWS resources.
+sqs:
+  region: "us-east-1"
+  queueUrl: "https://sqs.us-east-1.amazonaws.com/123456789012/my-queue.fifo"
+  queueArn: "arn:aws:sqs:us-east-1:123456789012:my-queue.fifo"
+  roleArn: "arn:aws:iam::123456789012:role/my-sqs-role"
+  defaultGroupId: "default"
+  # Messages above the threshold (256 KB) are offloaded to S3
+  largePayload:
+    bucket: "my-large-payload-bucket"
+    keyPrefix: "payloads/"
+  consumer:
+    numberOfMessages: "1"
+    visibilityTimeout: "30"
